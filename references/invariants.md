@@ -50,8 +50,8 @@ Three mitigations, in order of preference:
    expensive ones also run at the end.
 3. Keep the expensive full-history checks in `verify()`, which runs once.
 
-Never respond to the cost by removing the continuous check entirely. The precision
-is the whole point.
+Keep a continuous check for properties that need event-level failure timing. Use
+periodic or final checks only for properties whose cost requires that trade-off.
 
 ## Taxonomy of invariants that find real bugs
 
@@ -183,7 +183,7 @@ expensive way to have found it. Triage:
 | Result | What it is | What to do |
 |---|---|---|
 | Fails at zero faults | Ordinary bug | Fix it; keep a plain unit test. No simulation needed. |
-| Passes at zero faults, fails under faults | A DST target | This is the whole point. Shrink it. |
+| Passes at zero faults, fails under faults | DST target | Shrink it. |
 | Passes under `HARSH_PROBS` | Probably a weak invariant | Work the list above. |
 
 **Do not weaken the invariant to manufacture a DST target.** That is the failure

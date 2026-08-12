@@ -1,8 +1,6 @@
 """Self-check for the simulator itself.
 
-A simulator you cannot trust is worse than no simulator: it reports bugs that
-do not exist and, worse, hides bugs that do. These assertions check the five
-properties every claim in this skill depends on.
+These assertions cover the properties required for repeatable simulation results.
 
 Run: python test_sim.py
 """
@@ -58,7 +56,7 @@ def run_pair(seed: int, probs: dict) -> tuple[Sim, list]:
 
 
 def test_same_seed_same_bytes():
-    """The whole approach is worthless if this ever fails."""
+    """A failed check means same-seed replay is no longer guaranteed."""
     for seed in (0, 1, 7, 12345):
         s1, j1 = run_pair(seed, PROBS)
         s2, j2 = run_pair(seed, PROBS)

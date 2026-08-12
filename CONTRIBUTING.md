@@ -1,6 +1,8 @@
 # Contributing to deterministic-simulation-testing
 
-Thanks for considering a contribution. This skill ships runnable code and claims about that code, so the bar is evidence, not prose.
+Thanks for contributing. This repository includes runnable code and documentation
+that describes its behavior. Changes should include evidence for the behavior they
+introduce or alter.
 
 ## Before you write anything
 
@@ -38,7 +40,7 @@ Additionally:
 
 1. **State which rule or property your change touches.** "This adds asymmetric partition support" is fine. "This cleans up the send function" is not — `send` has three draws taken before an early return for a reason, and that reason is Rule 2.
 2. **Add or update the assertion** that guards the property you changed. A behavior change without a test change is a review block.
-3. **Do not add dependencies.** Stdlib only. This is a hard line, not a preference.
+3. **Do not add dependencies.** The project uses the Python standard library only.
 
 ## Rules for changes to the scanner
 
@@ -55,7 +57,8 @@ The scanner is deliberately noisy in the honest direction: false negatives (miss
 
 - It must still run. `test_docs.py` will fail the build if it does not.
 - Documented constants (like `DEFAULT_PROBS`) are diffed against the code. Update both or neither.
-- Do not paste simulator output into `SKILL.md` or docstrings. It rots. The README carries one captured run; CI verifies the script still produces a finding.
+- Do not paste simulator output into `SKILL.md` or docstrings. It becomes stale
+  when the fault model changes. The README has one captured run; CI runs the demo.
 
 ## Commit style
 
@@ -63,7 +66,7 @@ The scanner is deliberately noisy in the honest direction: false negatives (miss
 - Body explains WHY, not what. The diff shows what.
 - If you found a defect by running the skill against itself (the TDD approach in `writing-skills`), say so in the body and link the issue.
 
-## What will be rejected
+## Changes outside scope
 
 - A new dependency. Stdlib only.
 - A behavior change to `sim.py` without a corresponding test.

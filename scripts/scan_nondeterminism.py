@@ -6,9 +6,8 @@ every nondeterministic decision. Rule 1 is violated in places people do not thin
 to look: a log line that reads the wall clock, a set iteration, a default object
 hash. Each one silently breaks replay.
 
-This is a lexical scanner, so it is deliberately noisy in the honest direction:
-it reports candidates for a human to triage, and it does not claim a clean file
-is deterministic. Absence of findings is not proof.
+This lexical scanner reports candidates for review. A clean result does not prove a
+file is deterministic.
 
 Usage:
     scan_nondeterminism.py <path> [...]      # scan files or directories

@@ -13,22 +13,19 @@ What gets minimised is the **fault journal**: the set of faults that actually fi
 `Faults` records only positive decisions, which makes the journal a set of things
 that went wrong, and a set is the right object for delta debugging.
 
-From `demo_bug.py`, actual output:
+A journal might look like this:
 
-```
-seed 71: invariant violated at t=11265us: acked k0=v0 by n0, n0 is down, no durable copy anywhere
-6 faults fired
-
-shrunk 6 faults -> 3
+```text
+seed 71: invariant violated: acknowledged k0=v0 has no durable copy
+shrunk journal:
   ('crash', 'n0', 2)
   ('drop', 2)
   ('drop', 3)
 ```
 
-Three faults, and now the bug explains itself: both replication messages for `k0` were
-dropped, the leader acknowledged anyway, then the leader crashed. The acknowledged
-write existed only in a volatile page cache. Reading those three lines is faster than
-reading the code.
+The entry names the relevant conditions: both replication messages for `k0` were
+dropped, the leader acknowledged the write, and then the leader crashed. The value
+was present only in volatile storage.
 
 ## ddmin
 
@@ -42,15 +39,12 @@ Isolating Failure-Inducing Input".
 4. Stop when `n` exceeds the journal length.
 
 Complexity is O(k log n) test runs for a journal of n faults with k that are
-load-bearing. In practice it converges in well under a second, because each run is a
-simulation rather than a real deployment. This is a second-order benefit of DST that
-is easy to overlook: minimisation is only affordable because reproduction is
-instant.
+load-bearing. It is often practical because each candidate is a simulation rather
+than a real deployment.
 
 ## Re-verification is mandatory, and it must hold the signature
 
-The critical detail, and the thing that separates a shrinker you can trust from one
-that reports fiction:
+The critical detail is re-running each candidate:
 
 **Every candidate journal is RE-RUN and RE-VERIFIED. Never assume a smaller journal
 still fails.**
@@ -60,12 +54,9 @@ which changes timestamps, which changes the entire downstream execution. A small
 journal is a different universe, not a subset of the same one. It may fail for a
 different reason, or not fail at all.
 
-"Or it may fail for a different reason" is the trap, and re-verification alone does
-not close it. A shrinker that accepts ANY failure will happily descend into a
-different, easier-to-trigger bug and then report that small journal as the minimum
-for the bug you were investigating. Everything looks right: the journal reproduces
-a failure, the failure is real, the journal is small. It is still a false report,
-and the fix you derive from it will not touch the original bug.
+A candidate can fail for a different reason. A shrinker that accepts any failure can
+reduce to a second bug and report that smaller journal as the minimum for the first.
+The journal reproduces a failure, but not necessarily the one being investigated.
 
 So `shrink()` computes a **signature** for the original error - the message with
 numbers erased, since timestamps, ids, and counts vary between runs of the same bug
@@ -77,22 +68,17 @@ signature("invariant violated at t=11265us: acked k0=v0 by n0, no durable copy")
 # 'invariant violated at t=Nus: acked kN=vN by nN, no durable copy'
 ```
 
-With both properties in place the claim is precise: **the reported minimal journal
-reproduces the SAME failure**, because it was observed doing so. `test_sim.py`
-builds a world with two distinct bugs and asserts the shrinker does not slide
-between them.
+With both checks in place, the reported journal reproduces the same failure shape.
+`test_sim.py` builds a world with two bugs and checks that the shrinker does not
+switch between them.
 
 ### The empty journal must be tested explicitly
 
-ddmin splits a journal into chunks and removes one chunk at a time, so it can never
-propose the empty set. If the failure needs no faults at all - a plain happy-path
-bug that a fault-laden seed happened to surface - ddmin bottoms out at one
-arbitrary fault and reports it as load-bearing. The reader concludes the bug
-requires a dropped message. It does not.
+ddmin splits a journal into chunks and removes one chunk at a time, so it does not
+propose the empty set. If the failure needs no faults at all, ddmin can stop at one
+arbitrary fault and report it as load-bearing.
 
-`shrink()` therefore tests `[]` before entering the ddmin loop. This is the same
-class of dishonesty as a non-reproducing minimum, in the opposite direction, and it
-is easy to ship without noticing.
+`shrink()` therefore tests `[]` before entering the ddmin loop.
 
 ## Honest non-reproduction
 
@@ -105,9 +91,8 @@ on the faults: a specific latency ordering with no fault involved at all. Journa
 replay reproduces fault decisions, not the base random draws that were consumed by
 `rng` inside the generating run.
 
-The honest response is to say so. `test_shrink_is_honest_about_non_reproduction`
-asserts this behavior, because the tempting alternative, returning a plausible-looking
-minimum, produces a report nobody can act on.
+`test_shrink_is_honest_about_non_reproduction` covers this behavior. In that case,
+report the seed rather than a journal that does not reproduce.
 
 If you need journal replay to cover base draws as well, record the full draw sequence
 alongside the journal and replay from that. It is a larger artifact and it does not

@@ -1,6 +1,6 @@
 ---
 name: deterministic-simulation-testing
-description: "Use when a system has concurrency, I/O, networking, retries, or durability claims and normal tests keep passing while production keeps breaking. Builds a seeded simulator that collapses the whole system into one deterministic loop, injects network and disk and crash faults, searches thousands of universes, and shrinks any failure to a minimal byte-identical replay. Triggers on: deterministic simulation, DST, flaky test, heisenbug, race condition, distributed bug, lost write, fsync, durability, crash consistency, retry storm, cannot reproduce, works on my machine, fault injection, chaos testing, TigerBeetle, FoundationDB, Antithesis, madsim, turmoil, deterministic scheduler."
+description: "Use when concurrent or fault-prone systems have flaky, unreproducible failures or need crash, retry, durability, or ordering tests."
 license: MIT
 metadata:
   author: juleskuy
@@ -10,14 +10,13 @@ metadata:
 
 # Deterministic Simulation Testing
 
-The most valuable testing technique in existence, and almost nobody uses it, because
-the first attempt always fails for the same three reasons. This skill exists to get
-those three right the first time.
+Deterministic simulation testing replaces selected external dependencies with models
+you control. A seeded run can then be repeated, inspected, and reduced to a small
+failure case.
 
-FoundationDB reached a decade of production with zero data-corruption bugs on this
-technique. TigerBeetle designed its entire architecture around it. Antithesis built a
-company on it. All of them do the same thing: **stop testing the real system, and start
-testing a deterministic model of it, thousands of times, with the adversary in control.**
+This approach appears in projects such as FoundationDB and TigerBeetle. It is useful
+when correctness depends on the order of messages, timers, crashes, or durable writes.
+It does not replace integration testing against the real components.
 
 ## When to use this
 
@@ -38,21 +37,20 @@ Do NOT reach for DST when:
   Postgres wire protocol. Keep a thin integration tier for that.
 - The bug is already deterministically reproducible. Just fix it.
 
-DST finds bugs in your logic under adversarial scheduling. It does not find bugs in
-the layers you replaced with a model. Say this out loud when reporting results, because
-the difference is exactly where overconfidence comes from.
+DST tests the logic represented by the model under adversarial scheduling. It cannot
+test a driver, kernel, or service that the model replaces. Report that boundary with
+the result.
 
 ## The three rules
 
-Everything else in this skill is detail. These three are load-bearing, and violating
-any one of them produces a simulator that appears to work and silently proves nothing.
+These three rules determine whether replay and shrinking are reliable. If one is
+broken, a simulation result may not reproduce.
 
 ### Rule 1: exactly one source of nondeterminism
 
-Every nondeterministic decision in the entire system reads from one seeded RNG.
-No exceptions, and the exceptions are never where you expect. Run
+Every nondeterministic decision in the model reads from a seeded RNG. Run
 `scripts/scan_nondeterminism.py` on the code under test before writing a single
-line of simulator; it finds the ones people forget.
+line of simulator; use its findings as a review list, not as proof.
 
 The complete taxonomy, per language, with the fix for each, is in
 `references/nondeterminism.md`. The ones that bite hardest:
@@ -71,49 +69,39 @@ The complete taxonomy, per language, with the fix for each, is in
 - **Concurrent hashing of untrusted input.** Any structure whose behavior depends on
   a per-process random seed.
 
-Verification, not hope: run the same seed twice, assert the event traces are
-byte-identical. `scripts/test_sim.py::test_same_seed_same_bytes` is that assertion.
-Add it to CI on day one. The day it fails is the day every other DST result becomes
-meaningless, and you want to learn that from CI rather than from a bug you cannot trust.
+Run the same seed twice and compare the event traces byte for byte.
+`scripts/test_sim.py::test_same_seed_same_bytes` demonstrates the check. Put an
+equivalent test in CI before relying on any seed sweep.
 
 ### Rule 2: draw randomness unconditionally, then decide
 
-This is the rule nobody warns you about, and it destroys more DST attempts than
-anything else. Stated precisely, because the loose version is false and a
-reviewer will catch you: **within a single event, the number of draws consumed
-must not depend on which faults fire.**
+Within a single event, the number of random draws must not depend on which faults
+fire. Otherwise an early branch changes every later decision in that run.
 
 ```python
-# WRONG. When p == 0 the draw never happens, so every downstream random value
-# shifts, and seed 42 with faults enabled is a different universe from seed 42
-# with faults disabled. Now you cannot compare runs, and shrinking is fiction.
+# Wrong: when p == 0 the draw never happens. Later random decisions shift.
 if p > 0 and rng.random() < p:
     inject_fault()
 
-# RIGHT. The stream advances identically no matter what the configuration says.
+# Better: draw first, then decide whether to inject the fault.
 roll = rng.random()
 if p > 0 and roll < p:
     inject_fault()
 ```
 
-Same failure mode, subtler form: drawing a different NUMBER of values on different
-branches. In `sim.py::Sim.send`, three values are drawn on every single send -
+The same problem appears when different branches draw different numbers of values.
+In `sim.py::Sim.send`, three values are drawn on every send:
 base latency, duplicate gap, slowdown multiplier - even though most sends use only
 the first, and all three fault decisions (`drop`, `slow`, `dup`) are taken BEFORE
-the early `return` on drop. That waste is deliberate and load-bearing.
+the early `return` on drop.
 
-**What this rule does NOT claim:** that the TOTAL number of draws across a run is
-config-invariant. It is not, and it cannot be. A dropped message is never
-delivered, so its crash-check never happens; faults change which events exist at
-all. This is exactly why fault keys must be semantic (Rule 3) rather than indexed
-off the draw sequence. Anyone who tells you the whole stream is config-invariant
-has not counted the draws.
+This does not make the total draw count across a whole run configuration-invariant.
+A dropped message is not delivered, so its crash check does not happen. Faults change
+which events exist. That is why Rule 3 uses semantic keys instead of draw indexes.
 
-Two guards, and you need both. `test_probability_does_not_shift_the_stream`
-compares send timestamps, which only exercises `Sim.rng`; it passes even when the
-fault stream is broken. `test_fault_stream_does_not_shift_with_config` counts
-`Faults.draws` per event directly. A rule whose own guard cannot see the
-violation is not guarded.
+Use two checks. `test_probability_does_not_shift_the_stream` compares send
+timestamps and exercises `Sim.rng`. `test_fault_stream_does_not_shift_with_config`
+counts `Faults.draws` per event. Each covers a different stream.
 
 ### Rule 3: address faults by semantic key, never by time or draw index
 
@@ -143,34 +131,33 @@ count of messages processed, sequence number, request id. See
    predicate that must hold at EVERY instant, not at the end. `sim.invariant(fn)`
    re-checks after every event, so a violation is reported at the microsecond it
    occurs rather than diagnosed from wreckage. Write **one invariant per promise**,
-   never a composite: `demo_bug.py` ships a durability fix that passes 10,000
+   rather than a composite: `demo_bug.py` ships a durability fix that passes 10,000
    seeds and still acknowledges the same write twice, because `verify` only ever
    promised durability. Invariant design, including the trap of writing invariants
    that merely restate the implementation, is in `references/invariants.md`.
-4. **Run with zero faults, and TRIAGE what fails.** This step is not "proceed only
-   if clean". Expect strong invariants to fail here, and sort them:
-   - **Fails at zero faults** -> an ordinary bug on the happy path. Fix it, and
+4. **Run with zero faults and classify failures.** Strong invariants may fail here:
+   - **Fails at zero faults**: an ordinary bug on the happy path. Fix it, and
      keep it as a plain unit test. It did not need DST and never will.
-   - **Passes at zero faults, fails under faults** -> a DST target. This is the
-     whole point.
-   - **Passes under `HARSH_PROBS` too** -> suspect the invariant, not the system.
+   - **Passes at zero faults, fails under faults**: a DST target.
+   - **Passes under `HARSH_PROBS` too**: inspect the invariant before changing the
+     system.
      See `references/invariants.md`, "When invariants find nothing".
 
-   Do not weaken an invariant to get past this step. Split it: keep the strong
+   Do not weaken an invariant only to reach the fault sweep. Split it: keep the strong
    version as a unit test on the happy path, and derive the fault-only version
    for the sweep.
 5. **Turn on faults, sweep seeds.** Start with `DEFAULT_PROBS` from `sim.py`
    (`{"drop": 0.10, "dup": 0.05, "slow": 0.10, "crash": 0.02}`) - one number to
-   tune, imported rather than retyped. Sweep thousands. One seed is one universe;
-   the value is in the volume. Found nothing? Confirm you CAN break it with
-   `HARSH_PROBS` before touching anything else.
+   tune, imported rather than retyped. Sweep enough seeds to exercise the fault
+   paths you care about. If nothing fails, use `HARSH_PROBS` to check that the
+   invariant can fail at all.
 6. **Shrink.** `shrink()` runs ddmin over the fault journal and RE-VERIFIES every
-   candidate against the ORIGINAL failure's signature, so it cannot slide onto a
+   candidate against the original failure's signature, so it cannot slide onto a
    different, easier bug and report that journal as the minimum. It tests the
    empty journal explicitly, because ddmin's chunking can never propose it and a
    fault-independent failure would otherwise be reported as needing a fault.
    When the journal alone does not reproduce, it says so instead of inventing a
-   minimum, because a shrinker that reports fiction is worse than no shrinker.
+   minimum.
 7. **Check liveness in a quiesced tail.** Pass `quiesce_at` to `Sim`: faults stop
    firing after that instant, so "eventually" becomes meaningful. Asserting
    progress while the adversary is still active is wrong, because an adversary may
@@ -186,42 +173,27 @@ count of messages processed, sequence number, request id. See
 
 ## Working code
 
-`scripts/sim.py` is a complete simulator core, stdlib only, roughly 300 lines:
-seeded RNG, virtual clock, priority-queue executor, fault-injecting network
-(drop, duplicate, delay, slow), a `Disk` with honest `fsync` semantics, node
-crash and recovery (`auto_recover` reboots a crashed node so the recovery path
-actually runs), a `quiesce_at` window for liveness, continuous invariant checking,
-seed search, and signature-preserving ddmin shrinking.
+`scripts/sim.py` is a small stdlib-only simulator core. It provides a seeded RNG,
+virtual clock, priority-queue executor, network faults (drop, duplicate, delay, and
+slow), a `Disk` model with `fsync`, node crash and recovery, continuous invariants,
+seed search, and signature-preserving ddmin shrinking. `auto_recover` restarts a
+crashed node; `quiesce_at` creates a fault-free period for liveness checks.
 
-`scripts/demo_bug.py` is the proof. It plants a real bug - a group-commit
-replicated log that acknowledges the client on batch entry instead of after
-durability, the same class of bug that has shipped in real databases - finds it,
-shrinks it, verifies the fix over 10,000 seeds, and then finds a SECOND bug in the
-fixed design: the same write acknowledged twice, because `verify` only ever
-promised durability and nothing promised idempotency.
+`scripts/demo_bug.py` models a group-commit replicated log that acknowledges a write
+when it enters a batch rather than after durability. It finds and shrinks that loss,
+then runs the corrected version over 10,000 seeds. It also checks a separate
+idempotency property and demonstrates a duplicate acknowledgement.
 
-Run it rather than reading a transcript here. Output is not reproduced in this file
-on purpose: a pasted transcript rots the moment the fault stream changes, and CI
-cannot check prose. The README carries one captured run, and CI fails if the script
-stops finding either bug.
+Run the demo for current output. The README includes one captured result, but the
+seed and journal can change when the fault model changes.
 
-What to read in its output: the shrunk journal names the exact conditions in a few
-lines. Under zero faults the buggy code passes everything, because a process reads
-its own page cache and cannot detect its own missing durability. No hand-written
-test suite finds that by inspection, and the sweep finds it in under a second.
+`scripts/test_sim.py` covers determinism, journal replay, `fsync`, invariant timing,
+crash reporting, recovery, liveness quiescence, and shrink behavior. The test suite
+currently contains 16 assertions.
 
-`scripts/test_sim.py` verifies the simulator itself: determinism, seed divergence,
-journal replay without touching the RNG, zero-fault cleanliness, stream stability
-across configurations (both streams, separately), `fsync` semantics including the
-lying-fsync case, immediate invariant firing, crash-freedom reporting, the quiesce
-window, the recovery path, end-to-end bug detection, and three separate shrink
-honesty properties. 16 assertions, all passing. A simulator nobody checked is a
-random number generator with good PR.
-
-`scripts/scan_nondeterminism.py` scans nine languages for Rule 1 violations. Its
-own limits are printed on every run: `for x in items:` cannot be judged lexically
-because the type of `items` is unknown, and set iteration is the highest-frequency
-source in real code. Audit bare loops by hand.
+`scripts/scan_nondeterminism.py` scans nine languages for common Rule 1 violations.
+It cannot infer the type of an arbitrary loop variable such as `items`, so bare loops
+still need review when their source may be unordered.
 
 ## Failure modes to expect
 

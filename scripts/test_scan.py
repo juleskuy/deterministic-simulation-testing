@@ -1,9 +1,7 @@
 """Self-check for the nondeterminism scanner.
 
-Two failure modes matter, and they are not symmetric. A false negative means a
-simulator silently proves nothing, so every HIGH pattern is asserted to fire on
-a positive fixture. A false positive costs a human a minute, so only the ones
-that would fire constantly are asserted absent.
+Each HIGH rule has a positive fixture. Selected safe patterns also have negative
+fixtures to prevent noisy regressions.
 
 Run: python test_scan.py
 """

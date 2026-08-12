@@ -1,11 +1,9 @@
-"""Deterministic simulation testing core.
+"""Small deterministic simulation core.
 
-A whole distributed system, its network, its disks, and its clock, collapsed into
-one single-threaded loop driven by one integer seed. Same seed, same bytes, every
-time, on every machine.
+The simulator represents a system, network, disks, and clock in one event loop.
+The same seed and inputs produce the same event trace.
 
-Three rules make this work, and breaking any one of them silently destroys the
-value of the whole approach:
+Three rules keep replay and shrinking reliable:
 
 1. ONE source of randomness. Everything nondeterministic reads from `Sim.rng` or
    `Faults.rng`. No `time.now()`, no module-level `random` calls, no thread
@@ -357,7 +355,7 @@ Build = Callable[[Sim], Any]
 # PEP 604 unions are supported in annotations under ``from __future__ import
 # annotations``, but this alias is EXECUTED at import time. ``str | None``
 # therefore crashes Python 3.9 even though every other annotation parses.
-# `Optional[str]` keeps the declared 3.9 CI floor honest.
+# `Optional[str]` keeps the declared Python 3.9 CI floor valid.
 Verify = Callable[[Sim, Any], Optional[str]]
 
 _NUM = re.compile(r"\d+")
@@ -448,13 +446,13 @@ def shrink(
 
     The empty journal is tested explicitly: some failures need no faults at all,
     and ddmin's chunking can never propose the empty set on its own. Without
-    that check the result claims a fault is load-bearing when it is not.
+    that check the result can claim a fault is load-bearing when it is not.
     """
     original = list(journal)
     sim, err = _run_once(build, verify, until, seed, Faults(journal=original))
     if not err:
         # The journal alone does not reproduce it, so there is nothing to
-        # minimise honestly. Hand back the original and say so.
+        # minimise. Return the original journal and explain the result.
         return original, sim, "journal did not reproduce; report the seed instead"
     sig = signature(err)
 

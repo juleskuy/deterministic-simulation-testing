@@ -1,20 +1,11 @@
-"""A real durability bug, found by simulation, shrunk to a two-fault replay.
+"""A replicated-log durability example.
 
-The system under test is a three-node replicated log with GROUP COMMIT: writes
-accumulate in a batch and one `fsync` covers the whole batch. This is not a
-strawman. MySQL's binlog, PostgreSQL's `commit_delay`, Kafka, and most
-write-ahead logs all batch fsyncs, because fsync is the single most expensive
-operation in the storage stack.
+The leader batches writes, replicates them to two followers, and flushes the batch
+with `fsync`. The buggy version acknowledges a write before it is durable. The demo
+searches for a failing seed, shrinks the associated journal, then checks the corrected
+version. It also demonstrates a separate idempotency failure.
 
-The bug is one line: the leader acknowledges the client as soon as the write
-enters the batch, instead of after the batch is durable. Under no faults this
-is invisible - every read succeeds, because a process reads its own page cache.
-It needs a crash inside the batch window AND the replication messages to be
-lost, at the same time, to lose an acknowledged write.
-
-Run it. The output is produced, not described, so it is not transcribed here:
-a docstring cannot be kept honest by discipline alone. The README shows a
-captured run and CI fails if this script stops finding the bug.
+Run this file for current output. The README contains one example run.
 """
 
 from __future__ import annotations
@@ -64,9 +55,8 @@ class Leader(Node):
                 self.sim.send(self.id, f, ("repl", key, value))
 
             if self.ack_before_durable:
-                # BUG. The value exists only in this node's volatile page cache
-                # and in messages that may never arrive. Nothing is durable
-                # anywhere, yet the client is told the write is safe.
+                # Bug: the value is still in the local page cache and in
+                # replication messages that may not arrive. It is not durable.
                 self.client.on_ack(key, value, self.id)
             else:
                 self.pending[(key, value)] = set()
@@ -99,12 +89,10 @@ class Leader(Node):
             self._maybe_ack(key, value)
 
     def _maybe_ack(self, key, value):
-        """Correct rule: durable locally AND durable on at least one follower.
+        """Acknowledge after local durability and one remote durable copy.
 
-        Local fsync alone is not enough. A single-node fsync survives a process
-        crash but not a disk loss, and it does not survive the node never coming
-        back. One remote durable copy is the minimum honest bar for calling a
-        write acknowledged in a replicated system.
+        Local `fsync` handles a process crash, but replication provides a second
+        durable copy if the leader's disk or node is unavailable.
         """
         if self.ack_before_durable:
             return
@@ -132,7 +120,7 @@ class Follower(Node):
 
 
 class Client(Node):
-    """Issues writes and remembers exactly what the system promised."""
+    """Issues writes and records acknowledgements for the test oracle."""
 
     def __init__(self, sim: Sim, node_id: str, count: int):
         super().__init__(sim, node_id)
@@ -165,12 +153,9 @@ def make_world(ack_before_durable: bool):
         client.start()
 
         def durability_holds():
-            """Re-checked after every single event in the simulation.
+            """Check recovery of acknowledgements after each event.
 
-            An acknowledged write whose acknowledging node is down must be
-            recoverable from durable storage somewhere, or the acknowledgement
-            was a lie. Checking continuously, rather than at the end, is what
-            turns "the final state is wrong" into "it broke at t=41120us".
+            If the acknowledging node is down, another durable copy must exist.
             """
             for key, value, by in client.acked:
                 if sim.nodes[by].up:
@@ -197,12 +182,9 @@ def verify(sim: Sim, client: Client):
 
 
 def add_idempotency_invariant(build):
-    """Wrap a world with a SECOND, independent promise: one put, one ack.
+    """Add a separate invariant: each write is acknowledged at most once.
 
-    Kept separate on purpose. `verify` above only checks durability, so it
-    passes on a design that acknowledges the same write twice. This is the
-    trap `references/invariants.md` warns about: a suite that checks one
-    promise reports "fixed" while another promise is still broken.
+    `verify` checks durability only, so this stays separate from that check.
     """
 
     def wrapped(sim: Sim):
@@ -253,17 +235,15 @@ def main() -> int:
         return 1
     print(f"  {n} seeds, no violation")
 
-    # Describe what was actually found, rather than asserting a story that a
-    # later change to the fault stream would quietly falsify.
+    # Summarize the journal produced by this run.
     kinds = ", ".join(sorted({f[0] for f in minimal}))
     print(f"\nThe fix is one condition. The minimal trigger is {len(minimal)} fault(s)")
     print(f"({kinds}) at one specific point in one specific interleaving, and the")
     print("buggy code passes with zero faults because a process reads its own")
-    print("page cache. No hand-written test suite finds that by inspection.")
+    print("page cache.")
 
-    # The durability fix is real, and the system is still not correct. A second
-    # promise, never checked by `verify`, is broken in the SAME fixed design.
-    print("\nSECOND PROMISE  'one put => at most one ack', same FIXED design ...")
+    # Check an independent property against the same corrected design.
+    print("\nIdempotency check: one put => at most one ack ...")
     dup = search(add_idempotency_invariant(make_world(False)), verify,
                  range(3000), UNTIL, PROBS)
     if not dup:
@@ -274,8 +254,7 @@ def main() -> int:
         print(f"  seed {s}: {e}")
         print(f"  shrunk {len(j)} faults -> {len(m)}: {m}")
         print("  A duplicated request is acknowledged twice: no request-id dedup.")
-        print("  Durability was fixed; idempotency was never promised in `verify`.")
-        print("  One invariant per promise, or a passing suite means nothing.")
+        print("  `verify` checks durability only; this invariant checks idempotency.")
     return 0
 
 

@@ -1,17 +1,14 @@
 # deterministic-simulation-testing
 
-An agent skill for the most valuable testing technique almost nobody uses.
+A `SKILL.md` for testing concurrent or fault-prone systems with a deterministic
+simulator. It includes a small Python implementation, a worked failure, and tests
+for the claims made in the documentation.
 
-FoundationDB reached a decade of production with zero data-corruption bugs on it.
-TigerBeetle designed its whole architecture around it. Antithesis built a company on
-it. All of them do the same thing: **stop testing the real system, and start testing
-a deterministic model of it, thousands of times, with an adversary in control of the
-network, the disks, and the clock.**
+The approach is familiar from systems such as FoundationDB and TigerBeetle. Replace
+the real clock, network, and disk with controlled models, then run many seeded
+executions. A failed run leaves behind a replayable fault journal.
 
-This repo is that technique as a `SKILL.md` an agent can load, plus working code the
-agent can run, plus the self-checks that prove the code does what the prose claims.
-
-## The proof, not the pitch
+## Worked example
 
 `scripts/demo_bug.py` plants a real bug in a three-node replicated log with group
 commit: it acknowledges the client when a write enters the fsync batch, instead of
@@ -38,22 +35,20 @@ BUGGY  ack-on-batch-entry, searching 200 seeds ...
 FIXED  ack-after-durable, searching 10000 seeds ...
   10000 seeds, no violation
 
-SECOND PROMISE  'one put => at most one ack', same FIXED design ...
+Idempotency check: one put => at most one ack ...
   seed 227: invariant violated at t=37345us: acked k4=v4 twice
   shrunk 10 faults -> 2: [('drop', 7), ('dup', 10)]
 ```
 
-Read the minimal replay. `k0` is acknowledged at 4690us while both replication
-messages are still in flight and nothing is on disk anywhere; the leader crashes at
-6556us and the acknowledged write is gone. One fault, and the interleaving is the
-whole bug. 200 seeds found it in under a second, and the replay is a permanent
-regression test that runs in milliseconds and can never go flaky.
+In the replay, `k0` is acknowledged at 4690us while both replication messages are
+still in flight and no copy is durable. The leader crashes at 6556us, so the client
+has an acknowledgement for a write that cannot be recovered. The smallest replay
+contains one crash fault. It ran in under a second on this repository's test setup.
 
-Then read the last three lines, which are the part most DST write-ups leave out.
-The durability fix is real and clears 10,000 seeds. The same fixed design still
-acknowledges the same write twice, because `verify` only ever promised durability.
-A green sweep bounds what you checked, not what is true, so the demo proves its own
-limit rather than asserting correctness.
+The second result is deliberate. The durability fix clears 10,000 seeds, yet the
+same design can still acknowledge one write twice because `verify` checks durability
+only. A passing sweep describes the properties that were checked, not every property
+the system might need.
 
 ## What is here
 
@@ -162,11 +157,8 @@ highest-frequency nondeterminism source in real code, so bare loops are a manual
 audit. A lexical scan narrows the search; only `test_same_seed_same_bytes` proves
 anything.
 
-This skill was tested the way it asks you to test systems: an agent was given the
-task with the skill and without it, and the resulting critique was used to fix the
-skill. Nine defects came back, including two the prose asserted and the code did not
-honour. All nine are fixed, and each fix carries an assertion so the same claim
-cannot rot again silently.
+The documentation and implementation were reviewed together. The resulting fixes
+have regression tests so the documented behavior and code stay aligned.
 
 ## License
 
