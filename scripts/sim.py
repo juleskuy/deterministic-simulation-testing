@@ -27,7 +27,7 @@ from __future__ import annotations
 import heapq
 import random
 import re
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator, Optional
 
 __all__ = [
     "Sim",
@@ -354,7 +354,11 @@ def _brief(msg: Any) -> str:
 # ---------------------------------------------------------------------------
 
 Build = Callable[[Sim], Any]
-Verify = Callable[[Sim, Any], str | None]
+# PEP 604 unions are supported in annotations under ``from __future__ import
+# annotations``, but this alias is EXECUTED at import time. ``str | None``
+# therefore crashes Python 3.9 even though every other annotation parses.
+# `Optional[str]` keeps the declared 3.9 CI floor honest.
+Verify = Callable[[Sim, Any], Optional[str]]
 
 _NUM = re.compile(r"\d+")
 
