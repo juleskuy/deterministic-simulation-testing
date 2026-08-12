@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/juleskuy/deterministic-simulation-testing/security/advisories/new
+    about: Report vulnerabilities privately. Do not disclose exploit details in public issues.
+  - name: Contributing guide
+    url: https://github.com/juleskuy/deterministic-simulation-testing/blob/main/CONTRIBUTING.md
+    about: Read required checks and contribution standards before opening a pull request.
+  - name: Usage and support
+    url: https://github.com/juleskuy/deterministic-simulation-testing/discussions
+    about: Ask questions and share experiments in Discussions, not issue trackers.

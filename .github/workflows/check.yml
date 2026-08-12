@@ -1,0 +1,43 @@
+name: check
+on: [push, pull_request]
+
+# Least privilege. This workflow needs only the checked-out public source.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # The simulator must be deterministic before any of its results mean
+      # anything. Fresh process per run so hash-seed hazards cannot hide.
+      - run: python scripts/test_sim.py
+      - run: python scripts/test_scan.py
+
+      # Determinism is a cross-process property: PYTHONHASHSEED is chosen once
+      # at interpreter startup, so two runs inside one process share it and can
+      # hide a set-ordering hazard. Run the suite again under a different seed.
+      - run: PYTHONHASHSEED=0 python scripts/test_sim.py
+      - run: PYTHONHASHSEED=12345 python scripts/test_sim.py
+
+      # The snippets in references/*.md are executed, and the documented
+      # constants are compared against the code. Prose drifts; this catches it.
+      - run: python scripts/test_docs.py
+
+      # The code that runs under simulation must be free of HIGH findings.
+      # test_scan.py is excluded on purpose: its fixtures ARE hazard strings,
+      # and the scanner flagging them is the scanner working correctly.
+      - run: python scripts/scan_nondeterminism.py scripts/sim.py scripts/demo_bug.py
+
+      # End to end: the planted bug is found and shrunk, the fix survives
+      # 10,000 seeds, and the second promise (idempotency) is still violated.
+      # Fails the build if any of those three stops being true.
+      - run: python scripts/demo_bug.py

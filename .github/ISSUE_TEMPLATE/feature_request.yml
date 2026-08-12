@@ -1,0 +1,50 @@
+name: Feature request
+description: Propose a focused capability, fault model, scanner rule, or reference improvement.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Propose a problem and acceptance criteria. Feature requests that add a dependency will be closed: this repository is stdlib-only.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What production or testing failure is currently hard to find?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Name the smallest change that solves the problem. For fault models, describe its semantic journal key.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: State observable assertions. Include the new positive and negative scanner fixtures if this changes scan_nondeterminism.py.
+      placeholder: |
+        - [ ] A seeded simulation can inject the fault.
+        - [ ] The same seed and journal replay byte-identically.
+        - [ ] The targeted invariant fails on a planted bug and passes on the fix.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing standard-library or project mechanisms evaluated first.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I checked open issues and CHANGELOG.md for prior discussion.
+          required: true
+        - label: This proposal adds no runtime dependency.
+          required: true
+        - label: This is not a request for general support or debugging of my own system.
+          required: true

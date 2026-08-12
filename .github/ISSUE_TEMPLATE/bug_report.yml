@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a reproducible defect in the skill, simulator, scanner, or docs.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a defect. Do not post security-sensitive details here; use SECURITY.md instead.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - SKILL.md / workflow
+        - simulator (scripts/sim.py)
+        - demo (scripts/demo_bug.py)
+        - nondeterminism scanner
+        - reference documentation
+        - CI / test suite
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: State the promise that was broken, not only the observed output.
+      placeholder: "An acknowledged write remains recoverable after the acknowledging node crashes."
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproducer
+      description: Include the exact command, seed, fault journal, fault probabilities, and simulated time window when relevant.
+      placeholder: |
+        python scripts/demo_bug.py
+        seed: 48
+        journal: [('crash', 'n0', 1)]
+        probs: {'drop': 0.30, 'dup': 0.05, 'slow': 0.10, 'crash': 0.02}
+        until: 5000000
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Affected commit SHA
+      placeholder: "Output of: git rev-parse HEAD"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version and platform
+      placeholder: "Python 3.13.1, Ubuntu 24.04"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I ran the same seed twice and the traces matched or documented the divergence.
+          required: true
+        - label: I searched existing issues before opening this report.
+          required: true
+        - label: This is not a security report or it contains no sensitive details.
+          required: true
